@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 import math
+from inputs import get_integer, get_float
 
 version = "0.1.0"
 
@@ -62,9 +64,9 @@ def calc_observed_density(density_60, ctl):
 print(f"Tanker Load Planner v{version}")
 
 #empty weight calculations for Truck/Trailer combination
-emp_steer = int(input("What is your empty steer axle weight from your most recent scale ticket? "))
-emp_drives = int(input("What is your empty drive axle weight from your most recent scale ticket? "))
-emp_trailer = int(input("What is your empty trailer axle weight from your most recent scale ticket? "))
+emp_steer = get_integer("What is your empty steer axle weight from your most recent scale ticket? ")
+emp_drives = get_integer("What is your empty drive axle weight from your most recent scale ticket? ")
+emp_trailer = get_integer("What is your empty trailer axle weight from your most recent scale ticket? ")
 
 emp_gross = emp_steer + emp_drives + emp_trailer
 print(f"Your Gross empty weight is : {emp_gross:,} ")
@@ -75,8 +77,8 @@ target_payload = target_gross - emp_gross
 print(f"You have space for {target_payload:,} lbs of product. ")
 
 #Product density
-api_gravity = float(input("Enter API gravity from recent BOL: "))
-temperature = float(input("Enter Temperature from recent BOL: "))
+api_gravity = get_float("Enter API gravity from recent BOL: ")
+temperature = get_float("Enter Temperature from recent BOL: ", min_value=-100)
 
 prod_specific_gravity = calculate_specific_gravity(api_gravity)
 print(f"Specific Gravity @ 60F: {prod_specific_gravity:.4f}")
@@ -100,13 +102,13 @@ print(f"Observed Density: {observed_density:,.4f} lb/gal")
 recommended_gallons = target_payload / observed_density
 print(f"Recommended Gallons: {recommended_gallons:,.0f} ")
 
-total_gallons = int(input("How many total gallons would you like to load? "))
+total_gallons = get_integer("How many total gallons would you like to load? ")
 
 #ask driver for proposed compartment split
-comp_1 = float(input("How many gallons would you like in Compartment one? "))
-comp_2 = float(input("How many gallons would you like in Compartment two? "))
-comp_3 = float(input("How many gallons would you like in Compartment three? "))
-comp_4 = float(input("How many gallons would you like in Compartment four? "))
+comp_1 = get_float("How many gallons would you like in Compartment one? ")
+comp_2 = get_float("How many gallons would you like in Compartment two? ")
+comp_3 = get_float("How many gallons would you like in Compartment three? ")
+comp_4 = get_float("How many gallons would you like in Compartment four? ")
 
 #calculate compartment weights
 comp_1w = comp_1 * observed_density

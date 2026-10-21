@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import math
+
 from inputs import get_integer, get_float
 
 from calculations import (
@@ -11,84 +13,231 @@ from calculations import (
     calc_observed_density
 )
 
+from validation import validate_compartment, SAFETY_MARGIN
+
+
 version = "0.1.0"
+TARGET_GROSS = 79600
 
-#-------------------------------------------------------------------------------------------------------------------
+print(f"\nTanker Load Planner v{version}")
+print("-" * 55)
 
-print(f"Tanker Load Planner v{version}")
 
-#empty weight calculations for Truck/Trailer combination
-emp_steer = get_integer("What is your empty steer axle weight from your most recent scale ticket? ")
-emp_drives = get_integer("What is your empty drive axle weight from your most recent scale ticket? ")
-emp_trailer = get_integer("What is your empty trailer axle weight from your most recent scale ticket? ")
+# ---------------------------------------------------------
+# EMPTY TRUCK / TRAILER WEIGHTS
+# ---------------------------------------------------------
+
+emp_steer = get_integer(
+    "What is your empty steer axle weight from your most recent scale ticket? "
+)
+
+emp_drives = get_integer(
+    "What is your empty drive axle weight from your most recent scale ticket? "
+)
+
+emp_trailer = get_integer(
+    "What is your empty trailer axle weight from your most recent scale ticket? "
+)
 
 emp_gross = emp_steer + emp_drives + emp_trailer
-print(f"Your Gross empty weight is : {emp_gross:,} ")
 
-#Calculate target payload based on 79,600 lb target gross weight 
-target_gross = 79600
-target_payload = target_gross - emp_gross
-print(f"You have space for {target_payload:,} lbs of product. ")
+print(f"\nYour gross empty weight is: {emp_gross:,} lbs")
 
-#Product density
+target_payload = TARGET_GROSS - emp_gross
+
+if target_payload <= 0:
+    print("ERROR: Empty gross weight meets or exceeds the target.")
+    raise SystemExit(1)
+
+print(f"Available product weight: {target_payload:,} lbs")
+
+
+# ---------------------------------------------------------
+# PRODUCT DENSITY CALCULATIONS
+# ---------------------------------------------------------
+
 api_gravity = get_float("Enter API gravity from recent BOL: ")
-temperature = get_float("Enter Temperature from recent BOL: ", min_value=-100)
+
+temperature = get_float(
+    "Enter temperature from recent BOL: ",
+    min_value=-100
+)
 
 prod_specific_gravity = calculate_specific_gravity(api_gravity)
-print(f"Specific Gravity @ 60F: {prod_specific_gravity:.4f}")
 
 prod_density = calc_density_60(prod_specific_gravity)
-print(f"Density @ 60F = {prod_density:,.4f}lb/gal ")
 
 density_kg = convert_density_metric(prod_density)
-print(f"Density @ 60F: {density_kg:.4f} kg/m³")
 
 alpha_60 = calc_alpha_60(density_kg)
-print(f"Alpha @ 60F: {alpha_60:,.7f}")
 
 prod_ctl = calc_ctl(alpha_60, temperature)
-print(f"CTL: {prod_ctl:,.5f}")
 
-observed_density = calc_observed_density(prod_density, prod_ctl)
+observed_density = calc_observed_density(
+    prod_density,
+    prod_ctl
+)
+
+if not math.isfinite(observed_density) or observed_density <= 0:
+    print("ERROR: Invalid calculated product density.")
+    raise SystemExit(1)
+
+print("\n--- Product Density ---")
+print(f"Specific Gravity @ 60F: {prod_specific_gravity:.4f}")
+print(f"Density @ 60F: {prod_density:,.4f} lb/gal")
+print(f"Density @ 60F: {density_kg:.4f} kg/m³")
+print(f"Alpha @ 60F: {alpha_60:,.7f}")
+print(f"CTL: {prod_ctl:,.5f}")
 print(f"Observed Density: {observed_density:,.4f} lb/gal")
 
 
+# ---------------------------------------------------------
+# RECOMMENDED TOTAL GALLONS
+# ---------------------------------------------------------
+
 recommended_gallons = target_payload / observed_density
-print(f"Recommended Gallons: {recommended_gallons:,.0f} ")
 
-total_gallons = get_integer("How many total gallons would you like to load? ")
+print(f"\nRecommended Gallons: {recommended_gallons:,.0f}")
 
-#ask driver for proposed compartment split
-comp_1 = get_float("How many gallons would you like in Compartment one? ")
-comp_2 = get_float("How many gallons would you like in Compartment two? ")
-comp_3 = get_float("How many gallons would you like in Compartment three? ")
-comp_4 = get_float("How many gallons would you like in Compartment four? ")
-
-#calculate compartment weights
-comp_1w = comp_1 * observed_density
-comp_2w = comp_2 * observed_density
-comp_3w = comp_3 * observed_density
-comp_4w = comp_4 * observed_density
-
-print(f"Compartment 1: {comp_1} gals / {comp_1w:,.2f} lbs")
-print(f"Compartment 2: {comp_2} gals / {comp_2w:,.2f} lbs")
-print(f"Compartment 3: {comp_3} gals / {comp_3w:,.2f} lbs")
-print(f"Compartment 4: {comp_4} gals / {comp_4w:,.2f} lbs")
+total_gallons = get_integer(
+    "How many total gallons would you like to load? "
+)
 
 
-#confirm that combined compartment gallons does not exceed total gallons
-total_comp_gals = comp_1 + comp_2 + comp_3 + comp_4
+# ---------------------------------------------------------
+# TRAILER COMPARTMENT CONFIGURATION
+# ---------------------------------------------------------
 
-if total_comp_gals == total_gallons:
-    print("Compartment gallons equal total gallons.")
-elif total_comp_gals < total_gallons:
-    print("Compartment gallons are less than total gallons.")
-else:
-    print("You have exceeded your total gallons!")
+num_compartments = get_integer(
+    "How many compartments does your trailer have? ",
+    min_value=1
+)
+
+nominal_capacities = []
+
+print("\nEnter capacities from the manufacturer's data plate.")
+
+for comp in range(1, num_compartments + 1):
+
+    nominal_capacity = get_float(
+        f"Nominal capacity for compartment {comp}: ",
+        min_value=SAFETY_MARGIN + 1
+    )
+
+    nominal_capacities.append(nominal_capacity)
 
 
-prod_weight = comp_1w + comp_2w + comp_3w + comp_4w
-print(f"Product Weight: {prod_weight:,.2f} lbs")
+# ---------------------------------------------------------
+# PROPOSED COMPARTMENT LOADS
+# ---------------------------------------------------------
+
+while True:
+
+    compartment_gallons = []
+
+    print("\n--- Proposed Compartment Split ---")
+
+    for comp, nominal_capacity in enumerate(
+        nominal_capacities,
+        start=1
+    ):
+
+        max_gallons = nominal_capacity - SAFETY_MARGIN
+
+        print(
+            f"\nCompartment {comp} "
+            f"(TLP maximum: {max_gallons:,.0f} gallons)"
+        )
+
+        while True:
+
+            gallons = get_float(
+                f"Enter gallons for compartment {comp}: "
+            )
+
+            if validate_compartment(gallons, nominal_capacity):
+                compartment_gallons.append(gallons)
+                break
+
+            print(
+                f"Invalid load. Maximum permitted: "
+                f"{max_gallons:,.0f} gallons."
+            )
+
+    actual_total = sum(compartment_gallons)
+
+    if math.isclose(
+        actual_total,
+        total_gallons,
+        rel_tol=0,
+        abs_tol=0.01
+    ):
+        print("\nCompartment gallons match requested total.")
+        break
+
+    print("\nERROR: Compartment gallons do not match requested total.")
+    print(f"Requested total: {total_gallons:,.2f} gallons")
+    print(f"Compartment total: {actual_total:,.2f} gallons")
+    print("Please re-enter the compartment split.")
+
+
+# ---------------------------------------------------------
+# COMPARTMENT WEIGHT CALCULATIONS
+# ---------------------------------------------------------
+
+compartment_weights = []
+
+for gallons in compartment_gallons:
+
+    weight = gallons * observed_density
+
+    compartment_weights.append(weight)
+
+
+print("\n--- Compartment Loading Summary ---")
+
+for comp, (gallons, weight) in enumerate(
+    zip(compartment_gallons, compartment_weights),
+    start=1
+):
+
+    print(
+        f"Compartment {comp}: "
+        f"{gallons:,.0f} gals / {weight:,.2f} lbs"
+    )
+
+
+# ---------------------------------------------------------
+# PRODUCT AND GROSS WEIGHT
+# ---------------------------------------------------------
+
+prod_weight = sum(compartment_weights)
+
 gross_weight = prod_weight + emp_gross
-print(f"Gross weight: {gross_weight:,.2f} lbs ")
 
+print("\n--- Weight Summary ---")
+
+print(f"Empty Gross Weight: {emp_gross:,.2f} lbs")
+print(f"Product Weight: {prod_weight:,.2f} lbs")
+print(f"Calculated Gross Weight: {gross_weight:,.2f} lbs")
+print(f"Target Gross Weight: {TARGET_GROSS:,.2f} lbs")
+
+weight_difference = TARGET_GROSS - gross_weight
+
+if weight_difference >= 0:
+
+    print(
+        f"Below target gross by: "
+        f"{weight_difference:,.2f} lbs"
+    )
+
+else:
+
+    print(
+        f"WARNING: Exceeds target gross by "
+        f"{abs(weight_difference):,.2f} lbs"
+    )
+    raise SystemExit(1)
+
+print("\nTLP calculations completed.")
+print("Axle-weight distribution has not been validated.")

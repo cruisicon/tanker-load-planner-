@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import unittest
+from axle_data import CALIBRATION_LOADS
+from axle import predict_axle_weights
 
 from axle import (
     calculate_added_axle_weights,
@@ -42,6 +44,30 @@ class TestAxle(unittest.TestCase):
                 [11900, 34040, 33900]
             )
 
+    def test_prediction_conserves_weight(self):
+
+        empty_axles = [9760, 9040, 6480]
+
+        compartment_weights = [
+            18000,
+            14000,
+            6000,
+            15000
+        ]
+
+        predicted = predict_axle_weights(
+            empty_axles,
+            compartment_weights,
+            CALIBRATION_LOADS
+        )
+
+        predicted_payload = sum(predicted) - sum(empty_axles)
+
+        self.assertAlmostEqual(
+            predicted_payload,
+            sum(compartment_weights),
+            places=6
+        )
 
 if __name__ == "__main__":
     unittest.main()

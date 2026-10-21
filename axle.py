@@ -111,3 +111,137 @@ def predict_axle_weights(
     ]
 
     return predicted_loaded
+
+
+def calculate_load_position(compartment_weights):
+    """
+    Calculate the weighted average compartment position.
+
+    Positions are normalized from 0 (front) to 1 (rear).
+    """
+    if not compartment_weights or any(
+        not isinstance(w, (int, float))
+        or isinstance(w, bool)
+        or not math.isfinite(w)
+        or w < 0
+        for w in compartment_weights
+    ):
+        raise ValueError("Invalid compartment weights.")
+
+    total_weight = sum(compartment_weights)
+
+    if total_weight <= 0:
+        raise ValueError("Payload must be positive.")
+
+    count = len(compartment_weights)
+
+    if count == 1:
+        return 0.5
+
+    positions = [
+        i / (count - 1)
+        for i in range(count)
+    ]
+
+    return sum(
+        position * weight
+        for position, weight in zip(positions, compartment_weights)
+    ) / total_weight
+
+
+def predict_axles_by_position(
+    empty_axles,
+    compartment_weights,
+    calibration_loads,
+    regularization=0.01
+):
+    """
+    Preliminary position-sensitive axle prediction.
+
+    Uses historical axle shares and a regularized linear
+    relationship with the load's weighted position.
+    """
+
+    validate_axles(empty_axles)
+
+    if not calibration_loads:
+        raise ValueError("Calibration data is required.")
+
+    if not math.isfinite(regularization) or regularization <= 0:
+        raise ValueError("Regularization must be positive.")
+
+    current_position = calculate_load_position(compartment_weights)
+    current_payload = sum(compartment_weights)
+
+    positions = []
+    axle_shares = []
+
+    for load in calibration_loads:
+        gallons = load["compartment_gallons"]
+
+        added = calculate_added_axle_weights(
+            load["loaded_axles"],
+            load["empty_axles"]
+        )
+
+        total_added = sum(added)
+
+        if total_added <= 0:
+            raise ValueError("Invalid calibration payload.")
+
+        # Scale-derived density for historical loads.
+        density = total_added / sum(gallons)
+
+        weights = [g * density for g in gallons]
+
+        positions.append(calculate_load_position(weights))
+
+        axle_shares.append([
+            weight / total_added
+            for weight in added
+        ])
+
+    mean_position = sum(positions) / len(positions)
+
+    position_variance = sum(
+        (p - mean_position) ** 2 for p in positions
+    )
+
+    predicted_shares = []
+
+    for axle in range(3):
+        shares = [row[axle] for row in axle_shares]
+        mean_share = sum(shares) / len(shares)
+
+        covariance = sum(
+            (p - mean_position) * (s - mean_share)
+            for p, s in zip(positions, shares)
+        )
+
+        slope = covariance / (position_variance + regularization)
+
+        predicted_share = (
+            mean_share + slope * (current_position - mean_position)
+        )
+
+        predicted_shares.append(predicted_share)
+
+    # Normalize shares so total predicted payload is conserved.
+    predicted_shares = [
+        max(0.0, share) for share in predicted_shares
+    ]
+
+    share_total = sum(predicted_shares)
+
+    if share_total <= 0:
+        raise ValueError("Invalid predicted axle distribution.")
+
+    predicted_shares = [
+        share / share_total for share in predicted_shares
+    ]
+
+    return [
+        empty + current_payload * share
+        for empty, share in zip(empty_axles, predicted_shares)
+    ]
+
